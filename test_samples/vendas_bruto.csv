@@ -1,0 +1,6 @@
+ID_PEDIDO;CLIENTE_NOME_COMPLETO;DATA_VENDA;VALOR_TOTAL_BRUTO;STATUS_PAGAMENTO;DESCONTO_PERC
+10045;Arthur Guidolin Consultoria e Tecnologia da Informacao Ltda;12/05/2024;15850,50;Pago;0,05
+10046;Maria de Souza Pereira Oliveira;14/05/2024;350,00;Pendente;0,00
+10047;Empresa Brasileira de Logistica e Transportes Integrados S/A;15/05/2024;45200,90;Pago;0,10
+10048;Carlos Alberto Santos;18/05/2024;1299,99;Cancelado;0,02
+10049;Juliana Mendes Rocha;19/05/2024;8450,00;Pago;0,00
