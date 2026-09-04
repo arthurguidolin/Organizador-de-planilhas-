@@ -9,7 +9,7 @@ import re
 import csv
 import datetime
 from pathlib import Path
-from typing import Callable, Dict, Any, Optional, List, Tuple
+from typing import Callable, Dict, Any, Optional, List, Tuple, TypedDict
 
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -17,8 +17,18 @@ from openpyxl.utils import get_column_letter
 import pandas as pd
 
 
+class ThemePalette(TypedDict):
+    """Estrutura estrita de tipagem para as paletas de cores do organizador."""
+    header_fill: str
+    header_font: str
+    zebra_fill: str
+    border_color: str
+    header_border: str
+    accent: str
+
+
 # Paletas de cores executivas / profissionais
-THEMES = {
+THEMES: Dict[str, ThemePalette] = {
     "Azul Corporativo": {
         "header_fill": "1E3A8A",      # Deep Navy Blue
         "header_font": "FFFFFF",      # Branco
@@ -150,6 +160,13 @@ def detect_csv_delimiter_and_encoding(filepath: str) -> Tuple[str, str]:
 class SpreadsheetOrganizer:
     """Motor de organização e estilização de planilhas."""
 
+    # Expressões regulares pré-compiladas para alta performance
+    RE_FLOAT_BR = re.compile(r"^-?\d{1,3}(\.\d{3})*,\d+$")
+    RE_FLOAT_BR_SIMPLE = re.compile(r"^-?\d+,\d+$")
+    RE_FLOAT_STD = re.compile(r"^-?\d+(\.\d+)?$")
+    RE_DATE = re.compile(r"^(\d{2}/\d{2}/\d{4}|\d{4}-\d{2}-\d{2})(?: \d{2}:\d{2}:\d{2})?$")
+    RE_DATE_SHORT = re.compile(r"^(\d{2}/\d{2}/\d{4}|\d{4}-\d{2}-\d{2})$")
+
     def __init__(self, options: Optional[Dict[str, Any]] = None):
         self.options = {
             "theme": "Azul Corporativo",
@@ -209,6 +226,12 @@ class SpreadsheetOrganizer:
             headers = list(df.columns)
             ws.append(headers)
 
+            # Regexes pré-compiladas no escopo local para maximizar performance
+            re_float_br = self.RE_FLOAT_BR
+            re_float_br_simple = self.RE_FLOAT_BR_SIMPLE
+            re_float_std = self.RE_FLOAT_STD
+            re_date = self.RE_DATE
+
             # Tenta converter valores numéricos e datas para tipos adequados
             for row in df.itertuples(index=False):
                 typed_row = []
@@ -220,19 +243,19 @@ class SpreadsheetOrganizer:
                         # Tentativa de converter int/float
                         converted = False
                         # Checa se é float brasileiro (ex: 1.234,56 ou 1234,56)
-                        if re.match(r"^-?\d{1,3}(\.\d{3})*,\d+$", val_str):
+                        if re_float_br.match(val_str):
                             try:
                                 typed_row.append(float(val_str.replace(".", "").replace(",", ".")))
                                 converted = True
                             except ValueError:
                                 pass
-                        elif re.match(r"^-?\d+,\d+$", val_str):
+                        elif re_float_br_simple.match(val_str):
                             try:
                                 typed_row.append(float(val_str.replace(",", ".")))
                                 converted = True
                             except ValueError:
                                 pass
-                        elif re.match(r"^-?\d+(\.\d+)?$", val_str):
+                        elif re_float_std.match(val_str):
                             try:
                                 if "." in val_str:
                                     typed_row.append(float(val_str))
@@ -243,17 +266,26 @@ class SpreadsheetOrganizer:
                                 pass
 
                         if not converted:
-                            # Checa se é data ISO ou brasileira
-                            date_parsed = False
-                            for fmt in ("%d/%m/%Y", "%d/%m/%Y %H:%M:%S", "%Y-%m-%d", "%Y-%m-%d %H:%M:%S"):
-                                try:
-                                    dt = datetime.datetime.strptime(val_str, fmt)
-                                    typed_row.append(dt)
-                                    date_parsed = True
-                                    break
-                                except ValueError:
-                                    pass
-                            if not date_parsed:
+                            # Checa se é data ISO ou brasileira com pré-validação rápida de tamanho e regex
+                            val_len = len(val_str)
+                            if val_len in (10, 19) and re_date.match(val_str):
+                                date_parsed = False
+                                formats = (
+                                    ("%d/%m/%Y", "%Y-%m-%d")
+                                    if val_len == 10
+                                    else ("%d/%m/%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S")
+                                )
+                                for fmt in formats:
+                                    try:
+                                        dt = datetime.datetime.strptime(val_str, fmt)
+                                        typed_row.append(dt)
+                                        date_parsed = True
+                                        break
+                                    except ValueError:
+                                        pass
+                                if not date_parsed:
+                                    typed_row.append(val_str)
+                            else:
                                 typed_row.append(val_str)
                 ws.append(typed_row)
             return wb
@@ -409,7 +441,7 @@ class SpreadsheetOrganizer:
                     if col_type == "code" or (val_clean.isdigit() and len(val_clean) >= 6):
                         if options.get("smart_align", True):
                             cell.alignment = Alignment(horizontal="center", vertical="center")
-                    elif re.match(r"^\d{2}/\d{2}/\d{4}$", val_clean) or re.match(r"^\d{4}-\d{2}-\d{2}$", val_clean):
+                    elif self.RE_DATE_SHORT.match(val_clean):
                         if options.get("smart_align", True):
                             cell.alignment = Alignment(horizontal="center", vertical="center")
                     else:
@@ -418,11 +450,12 @@ class SpreadsheetOrganizer:
 
         # 3. Ajuste Automático de Largura de Colunas
         if options.get("auto_column_width", True):
+            max_check_row = min(max_row, 500)
             for col_idx in range(1, max_col + 1):
                 col_letter = get_column_letter(col_idx)
                 max_len = 0
                 
-                for row_idx in range(1, max_row + 1):
+                for row_idx in range(1, max_check_row + 1):
                     cell = ws.cell(row=row_idx, column=col_idx)
                     val = cell.value
                     if val is None:
@@ -444,6 +477,11 @@ class SpreadsheetOrganizer:
                     
                     if length > max_len:
                         max_len = length
+
+                    # Early break se já atingiu a largura máxima permitida (60)
+                    if length >= 60:
+                        max_len = 60
+                        break
 
                 # Margem de respiro + espaço para o botão do auto-filtro
                 filter_padding = 4 if options.get("auto_filters", True) else 2
